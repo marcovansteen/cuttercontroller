@@ -6,17 +6,35 @@
 #include <cstddef>
 #include <cstdarg>
 
-// Runtime parameters die lengte en timing bepalen
+//---------------------------
+// CutterController.h
+// Dit is de interface naar de code die beslist wanneer het mes moet worden bediend.
+// De werkelijke code is te vinden in CutterController.cpp
+// De worst passeert eerst sensor S1, dan sensor S2 en daarna de Referentie positie.
+// De Referentie positie is een markering op of aan de sensor beugel, die zichtbaar is voor de operator.
+//
+// Het regelalgoritme heeft twee modi: Autohold uit en Autohold aan
+//---------------------------
+
+// Runtime parameters die lengte en timing bepalen.
+// Alle eenheden zijn volgens S.I., dus meters, seconden en meters per seconde. 
+// Bv. een afstand van 0.05 is 5 cm, en een tijd van 0.02 is 20 milliseconden.
 struct CutterConfig {
    
-  float afstandS2totPijl = 0.065f;    // De vaste afstand van S2 tot de pijl, in meters, hier noteren.
-  float afstandTussenS1enS2 = 0.05f;  // Afstand tussen de twee sensoren, gebruikt om de invoersnelheid te schatten.
-  double snijVertragingOp = 0.05;     // De tijd tussen opgaande stuurflank en mes (laag -> hoog) [s]
-  double snijVertragingNeer = 0.07;   // De tijd tussen neergaande stuurflank en mes (laag -> hoog) [s]
-  double maxLengteCorrectie = 100.0;  // Maximale lengtecorrectie die per snede mag worden toegepast.
-  double minSnijInterval = 0.05;      // Minimum toegestane interval tussen snedes om overruns te voorkomen.
-  double maxSnijInterval = 4.0;       // Maximum toegestane interval tussen snedes. Dit bepaalt de langzaamste snelheid van de lijn !!!
-
+  const bool autoHoldMogelijk = true;         // Zet deze op  = false (alleen kleine letters) om autohold uit te schakelen
+  const float afstandS2totReferentie = 0.065; // In meters. De vaste afstand van S2 tot de referentie hier noteren. Moet groter dan 0 zijn !!
+  const float afstandTussenS1enS2 = 0.050;    // In meters. Afstand tussen de twee sensoren, gebruikt om de invoersnelheid te schatten.
+  const double snijVertragingOpInit = 0.03;   // In seconden. De tijd tussen opgaande stuurflank en mes (laag -> hoog), na inschakelen.
+  const double snijVertragingNeerInit = 0.03; // In seconden. De tijd tussen neergaande stuurflank en mes (laag -> hoog), na inschakelen.
+  const double maxLengteCorrectie = 100.0;    // In meters. Maximale lengtecorrectie die per snede mag worden toegepast.
+  const double maxTeWachtenTijd = 2.0;        // In seconden. Maximum toegestane interval tussen snedes. Dit bepaalt de laagst mogelijke snelheid van de lijn !!!
+  const uint8_t aantalLengtes = 3;            // Over dit aantal lengtes wordt bepaald of lengte Constant is (voor auto-hold). Bij meer dan 100, dat getal ook verderop aanpassen in de regel die "lengtes[100]" bevat.
+  float minSnijVertraging = -0.4;             // In seconden, autohold regelt niet lager dan deze tijd terug
+  float maxSnijVertraging = 0.4;              // In seconden, autohold regelt niet hoger dan deze tijd op
+  const float autoHoldBijRegelStap = 0.001;   // In seconden per "even" worst per stap. 
+  const float autoHoldAanDrempel = 0.05;      // In meters. Als gemeten spreiding kleiner is dan deze lengte dan springt 'autohold' aan.
+  const float autoHoldUitDrempel = 0.10;      // In meters. Als gemeten spreiding over laatste AantalLengtes groter is dan deze drempel, springt 'autohold' uit.
+  
 };
 
 // Output state waarmee de aanroepende functie bv het mes kan besturen
@@ -58,29 +76,36 @@ private:
   };
 
   void logMessage(const char* format, ...) const;
-
   CutterConfig config;
-
   ControllerState controller_state;
   LogCallback log_callback_;
   bool logging_enabled_;
-
   void transitionToState(ControllerState next_state);
-
   static const char* controllerStateName(ControllerState state);
 
+  void leerLengte(float lengte);            // verwerkt nieuw gemeten lengte
+  float lengte[100];                        // circulaire buffer
+  void updateAutoHoldTiming(float lengte);  // past timing aan bij autohold
+  void updateAutoHold();                    // schakelt autoHold aan/uit
+  float autoHoldSpreiding = 0.1;            // laatst gemeten spreiding
+  float autoHoldGemiddeldeLengte = 0.4;     // laatst bepaalde gemiddelde
+  float autoHoldDoelLengte = 0.4;           // doel lengte
+  bool autoHoldActief = false;
+  float autoHoldBijRegelStap = 0.1;         // in meters, bijregelstap van autohold
+  float snijVertragingOp;
+  float snijVertragingNeer;
+  float geleerdeLengte;
+  
+  bool lengteBufferVol = false;             // geeft aan of er al voldoende metingen ontvangen zijn
+  uint8_t lengteIdx = 0;
+    
   bool mesStand;
   float worstSnelheid;
   float snijMoment;
   float msTotSnijMoment;
-  float snijVertragingOp;
-  float snijVertragingNeer;
+
   float worstLengte;
 
-  bool worstLengteLeren;
-  float geleerdeLengte;
-  float tijdCorrectieOmlaag;
-  float tijdCorrectieOmhoog;
   float beginVanWorstLaatstGezienDoorS1;
   
 };

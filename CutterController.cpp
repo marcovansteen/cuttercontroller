@@ -1,23 +1,19 @@
 #include <cstdint>
 #include "CutterController.h"
-
-#include <algorithm>
 #include <cstdarg>
 #include <cstdio>
 
+// ---------------------------------------------------------------------------------------------
 // Initialize controller state from the provided configuration and bootstrap timing.
-CutterController::CutterController(const CutterConfig& config)
-  : config(config),
-    controller_state(ControllerState::Geen),
-    log_callback_(nullptr),
-    logging_enabled_(false) {
+CutterController::CutterController(const CutterConfig& config): config(config), controller_state(ControllerState::Geen), log_callback_(nullptr), logging_enabled_(false) {
   mesStand = false;
-  worstLengteLeren = true;
-  snijVertragingOp = config.snijVertragingOp;
-  snijVertragingNeer = config.snijVertragingNeer;
+  autoHoldActief= false;
+  snijVertragingOp = config.snijVertragingOpInit;
+  snijVertragingNeer = config.snijVertragingNeerInit;
   geleerdeLengte = 0.4; // standaard waarde van 40 cm voor het geval dat
 }
 
+// ---------------------------------------------------------------------------------------------
 // Sample sensors, timing, and latency feedback to determine whether a cut should fire and
 // to update telemetry that downstream systems (MES, pneumatics) consume.
 CutterResult CutterController::update(bool worstVoorS1, bool worstVoorS2, double nu) {
@@ -28,7 +24,6 @@ CutterResult CutterController::update(bool worstVoorS1, bool worstVoorS2, double
 
     case ControllerState::Geen:
       if (worstVoorS1 and !worstVoorS2) {
-      // if (worstVoorS1) {
         beginVanWorstLaatstGezienDoorS1 = nu;
         transitionToState(ControllerState::AlleenS1);
       }
@@ -43,35 +38,37 @@ CutterResult CutterController::update(bool worstVoorS1, bool worstVoorS2, double
         if (tijdTussenS1enS2 < 1e-3) {  // dit voorkomt delen door een heel klein getal
           logMessage("Diff '%d' is kleiner dan 1.0ms, afgerond naar 1.0ms", tijdTussenS1enS2);
           tijdTussenS1enS2 = 1e-3;
-        }
+        } 
         worstSnelheid = config.afstandTussenS1enS2 / tijdTussenS1enS2;
-        logMessage("v               : %.3f m/s,", worstSnelheid);
+        logMessage("\nv: %.3f m/s, ", worstSnelheid);
 
         float dodeTijd;
         if (mesStand) {
-          dodeTijd = snijVertragingNeer;
-        } else {
-          dodeTijd = snijVertragingOp;
+          dodeTijd = snijVertragingNeer;    // aangezien de autohold regelaar hier ingrijpt,
+        } else {                            // kan de dodetijd ook negatief worden !
+          dodeTijd = snijVertragingOp;      // 
         }
-        
+
         // bereken snij tijdstip zodat de worst wordt doorgesneden zodra de voorkant bij "pijl" aankomt,
-        // hou via 'dodeTijd' rekening met pneumatiek en mes mechaniek
-        snijMoment = beginVanWorstLaatstGezienDoorS2 + config.afstandS2totPijl / worstSnelheid - dodeTijd;
+        // hou via 'dodeTijd' rekening met pneumatiek, mes mechaniek en autohold bijsturing
+        snijMoment = beginVanWorstLaatstGezienDoorS2 + config.afstandS2totReferentie / worstSnelheid - dodeTijd;
         
         float teWachtenTijd = snijMoment - nu;
-        if(teWachtenTijd > config.maxSnijInterval ) {   // dit bepaalt de langzaamste snelheid van de lijn !!!
-          teWachtenTijd = config.maxSnijInterval;
+        if(teWachtenTijd > config.maxTeWachtenTijd ) {     // Dit bepaalt de laagst mogelijke snelheid van de lijn.
+          teWachtenTijd = config.maxTeWachtenTijd;
+          snijMoment = nu + config.maxTeWachtenTijd;       // Is aan te passen in CutterController.h !!!
         }
-        logMessage("Wacht nog       : %.0f ms", 1000 * teWachtenTijd);
-      }
+        
+        logMessage("Wacht: %.0f ms, ", 1000 * teWachtenTijd);
+      } 
       break;
     
     case ControllerState::Beide:
       if (nu >= snijMoment) {
         transitionToState(ControllerState::SnijCommandoVerstuurd);
-
         mesStand = !mesStand;
-        // logMessage("Changing cutter state from %d to %d", !cutterState, cutterState);
+
+        updateAutoHold();
       }
       break;
     
@@ -82,16 +79,14 @@ CutterResult CutterController::update(bool worstVoorS1, bool worstVoorS2, double
         float eindVanWorstLaatstGezienDoorS1 = nu;
         float tijdsduurWorstVoorS1 = eindVanWorstLaatstGezienDoorS1 - beginVanWorstLaatstGezienDoorS1;
         worstLengte = tijdsduurWorstVoorS1 * worstSnelheid;
-        logMessage("Lengteschatting : %.2f mm\n", 1000 * worstLengte);
+        logMessage("Worstlengte: %.1f mm. ", 1000 * worstLengte);
+        leerLengte(worstLengte);
+
       }
       break;
     
     case ControllerState::AlleenS2:
-
       transitionToState(ControllerState::Geen);
-
-      // todo: measure actual size of the string, based on the speed and time se wee S1 detect front and end of string.
-      // logMessage("TODO: implement string length doublecheck calculation and adjust up/down latency of the cutter");
       break;
   }
 
@@ -107,6 +102,89 @@ CutterResult CutterController::update(bool worstVoorS1, bool worstVoorS2, double
   return resultaat;
 }
 
+// ---------------------------------------------------------------------------------------------
+// verwerk nieuw gemeten lengte
+void CutterController::leerLengte(float nieuwe_lengte) {
+
+  // bewaar laatst gemeten lengte in circulaire buffer
+  lengte[lengteIdx++] = nieuwe_lengte;
+  if(lengteIdx >= config.aantalLengtes) {
+    lengteIdx = 0;
+    lengteBufferVol = true;
+  }
+
+  // bereken spreiding en gemiddelde van laatste lengtes
+  float min = 10000;
+  float max = -1;
+  float totaleLengte = 0;
+
+  if (lengteBufferVol) {
+    logMessage("Buffer: ");
+    for (uint8_t i = 0; i < config.aantalLengtes; i++) {
+      logMessage("%.1f, ", 1000 * lengte[i]);
+      totaleLengte += lengte[i];  // voor bepaling gemiddelde
+      if(lengte[i] > max) max = lengte[i];    // voor bepaling spreiding
+      if(lengte[i] < min) min = lengte[i];
+    }
+    autoHoldSpreiding = max - min;
+    autoHoldGemiddeldeLengte = totaleLengte / config.aantalLengtes;
+    logMessage("max: %.1f mm, min: %.1f mm, spreiding: %.1f mm, gem.: %.1f mm, snijVertragingOp: %.3f s, snijVertragingNeer: %.3f s.", 1000 * max, 1000 * min, 1000 * autoHoldSpreiding, 1000 * autoHoldGemiddeldeLengte, snijVertragingOp, snijVertragingNeer);
+  }
+
+  updateAutoHoldTiming(nieuwe_lengte);
+
+}
+
+// ---------------------------------------------------------------------------------------------
+// schakelt autoHold aan/uit
+void CutterController::updateAutoHold() {
+
+  if(!config.autoHoldMogelijk) return;
+
+  if(!autoHoldActief) {
+    if(autoHoldSpreiding < config.autoHoldAanDrempel) {   // schakel auto-hold in
+      autoHoldActief = true;
+      autoHoldDoelLengte = autoHoldGemiddeldeLengte;
+      logMessage(" ** AUTOHOLD AAN (doel: %.2f mm) ** ", 1000 * autoHoldDoelLengte);
+    }
+  } else { 
+    if(autoHoldSpreiding > config.autoHoldUitDrempel) {   // schakel auto-hold uit
+      autoHoldActief= false;        // reset buffer om na afwijking te snel terug inschakelen te voorkomen
+      lengteBufferVol = false;
+      lengteIdx = 0;
+      logMessage(" ** AUTOHOLD UIT ** ");
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// past timing aan bij autohold
+void CutterController::updateAutoHoldTiming(float nieuweLengte) {
+
+  // Een PID regeling zou te gek zijn maar afregelen daarvan is lastig.
+  // Vandaar een stomme op/neer regeling. Worst te lang? Tandje terug.
+  // En omgekeerd. Dit apart regelen voor mes omhoog en omlaag. 
+  if(autoHoldActief) {
+
+    float tijdStap = config.autoHoldBijRegelStap / worstSnelheid;
+
+    if(mesStand) {
+      if(nieuweLengte > autoHoldDoelLengte) snijVertragingOp -= tijdStap; else snijVertragingOp += tijdStap;
+    } else {
+      if(nieuweLengte > autoHoldDoelLengte) snijVertragingNeer -= tijdStap; else snijVertragingNeer += tijdStap;
+    }
+      
+    // begrens de regelaar om puinhoop in de fabriek te voorkomen bij op hol geslagen regeling
+    if(snijVertragingOp < config.minSnijVertraging)   snijVertragingOp = config.minSnijVertraging;
+    if(snijVertragingOp > config.maxSnijVertraging)   snijVertragingOp = config.maxSnijVertraging;
+    if(snijVertragingNeer < config.minSnijVertraging) snijVertragingNeer = config.minSnijVertraging;
+    if(snijVertragingNeer > config.maxSnijVertraging) snijVertragingNeer = config.maxSnijVertraging; 
+  }
+
+}
+
+// ---------------------------------------------------------------------------------------------
+// helper-functie voor logging: zet state om in leesbare tekst
 const char* CutterController::controllerStateName(ControllerState state) {
   switch (state) {
     case ControllerState::Geen:
@@ -123,19 +201,27 @@ const char* CutterController::controllerStateName(ControllerState state) {
   return "unknown";
 }
 
-void CutterController::transitionToState(ControllerState newState) {
-  controller_state = newState;
-  printf("* %s\n", controllerStateName(controller_state));
+// ---------------------------------------------------------------------------------------------
+// ga naar volgende state
+void CutterController::transitionToState(ControllerState nieuweState) {
+  controller_state = nieuweState;
+  // logMessage("* %s", controllerStateName(controller_state));
 }
 
+// ---------------------------------------------------------------------------------------------
+// stel functie in die logging uitprint
 void CutterController::setLogCallback(LogCallback callback) {
   log_callback_ = callback;
 }
 
+// ---------------------------------------------------------------------------------------------
+// zet logging aan of uit
 void CutterController::enableLogging(bool enabled) {
   logging_enabled_ = enabled;
 }
 
+// ---------------------------------------------------------------------------------------------
+// schrijf boodschap voor diagnostiek naar seriele poort
 void CutterController::logMessage(const char* format, ...) const {
   if (!logging_enabled_ || !log_callback_ || !format) {
     return;
