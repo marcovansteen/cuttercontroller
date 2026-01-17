@@ -26,7 +26,6 @@ struct CutterConfig {
   const float afstandTussenS1enS2 = 0.050;    // In meters. Afstand tussen de twee sensoren, gebruikt om de invoersnelheid te schatten.
   const double snijVertragingOpInit = 0.03;   // In seconden. De tijd tussen opgaande stuurflank en mes (laag -> hoog), na inschakelen.
   const double snijVertragingNeerInit = 0.03; // In seconden. De tijd tussen neergaande stuurflank en mes (laag -> hoog), na inschakelen.
-  const double maxLengteCorrectie = 100.0;    // In meters. Maximale lengtecorrectie die per snede mag worden toegepast.
   const double maxTeWachtenTijd = 2.0;        // In seconden. Maximum toegestane interval tussen snedes. Dit bepaalt de laagst mogelijke snelheid van de lijn !!!
   const uint8_t aantalLengtes = 3;            // Over dit aantal lengtes wordt bepaald of lengte Constant is (voor auto-hold). Bij meer dan 100, dat getal ook verderop aanpassen in de regel die "lengtes[100]" bevat.
   float minSnijVertraging = -0.4;             // In seconden, autohold regelt niet lager dan deze tijd terug
@@ -43,7 +42,6 @@ struct CutterResult {
   bool mesStand;
   float worstSnelheid;
   float snijMoment;
-  float msTotSnijMoment;
   float snijVertragingOp;
   float snijVertragingNeer;
   float worstLengte;
@@ -80,7 +78,7 @@ private:
   ControllerState controller_state;
   LogCallback log_callback_;
   bool logging_enabled_;
-  void transitionToState(ControllerState next_state);
+  void transitionToState(ControllerState nieuweState, double nu);
   static const char* controllerStateName(ControllerState state);
 
   void leerLengte(float lengte);            // verwerkt nieuw gemeten lengte
@@ -91,10 +89,10 @@ private:
   float autoHoldGemiddeldeLengte = 0.4;     // laatst bepaalde gemiddelde
   float autoHoldDoelLengte = 0.4;           // doel lengte
   bool autoHoldActief = false;
-  float autoHoldBijRegelStap = 0.1;         // in meters, bijregelstap van autohold
   float snijVertragingOp;
   float snijVertragingNeer;
   float geleerdeLengte;
+  double tijdLaatsteStateWijziging = 0.0;   // voor time-out
   
   bool lengteBufferVol = false;             // geeft aan of er al voldoende metingen ontvangen zijn
   uint8_t lengteIdx = 0;

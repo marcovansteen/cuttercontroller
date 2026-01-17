@@ -25,13 +25,13 @@ CutterResult CutterController::update(bool worstVoorS1, bool worstVoorS2, double
     case ControllerState::Geen:
       if (worstVoorS1 and !worstVoorS2) {
         beginVanWorstLaatstGezienDoorS1 = nu;
-        transitionToState(ControllerState::AlleenS1);
+        transitionToState(ControllerState::AlleenS1, nu);
       }
       break;
     
     case ControllerState::AlleenS1:
       if (worstVoorS2) {
-        transitionToState(ControllerState::Beide);
+        transitionToState(ControllerState::Beide, nu);
 
         float beginVanWorstLaatstGezienDoorS2 = nu;
         float tijdTussenS1enS2 = beginVanWorstLaatstGezienDoorS2 - beginVanWorstLaatstGezienDoorS1;
@@ -54,7 +54,7 @@ CutterResult CutterController::update(bool worstVoorS1, bool worstVoorS2, double
         snijMoment = beginVanWorstLaatstGezienDoorS2 + config.afstandS2totReferentie / worstSnelheid - dodeTijd;
         
         float teWachtenTijd = snijMoment - nu;
-        if(teWachtenTijd > config.maxTeWachtenTijd ) {     // Dit bepaalt de laagst mogelijke snelheid van de lijn.
+        if(teWachtenTijd > config.maxTeWachtenTijd ) {     // Dit bepaalt de laagst mogelijke snelheid, en de maximale worstlengte.
           teWachtenTijd = config.maxTeWachtenTijd;
           snijMoment = nu + config.maxTeWachtenTijd;       // Is aan te passen in CutterController.h !!!
         }
@@ -65,35 +65,44 @@ CutterResult CutterController::update(bool worstVoorS1, bool worstVoorS2, double
     
     case ControllerState::Beide:
       if (nu >= snijMoment) {
-        transitionToState(ControllerState::SnijCommandoVerstuurd);
+        transitionToState(ControllerState::SnijCommandoVerstuurd, nu);
         mesStand = !mesStand;
 
         updateAutoHold();
+      } else {
+        if (!worstVoorS1 || !worstVoorS2) {
+          transitionToState(ControllerState::AlleenS2, nu);
+          logMessage("** Worst verdwenen voor het snijmoment **\n");
+        }
       }
       break;
     
     case ControllerState::SnijCommandoVerstuurd:
       if (!worstVoorS1) {
-        transitionToState(ControllerState::AlleenS2);
+        transitionToState(ControllerState::AlleenS2, nu);
 
         float eindVanWorstLaatstGezienDoorS1 = nu;
         float tijdsduurWorstVoorS1 = eindVanWorstLaatstGezienDoorS1 - beginVanWorstLaatstGezienDoorS1;
         worstLengte = tijdsduurWorstVoorS1 * worstSnelheid;
         logMessage("Worstlengte: %.1f mm. ", 1000 * worstLengte);
         leerLengte(worstLengte);
-
       }
       break;
     
     case ControllerState::AlleenS2:
-      transitionToState(ControllerState::Geen);
+      transitionToState(ControllerState::Geen, nu);
       break;
+  }
+
+  // time-out, voor het geval dat
+  if (nu - tijdLaatsteStateWijziging > config.maxTeWachtenTijd * 2) { 
+    logMessage("** State timeout, terug naar Geen **\n");
+    transitionToState(ControllerState::Geen, nu);
   }
 
   resultaat.mesStand = mesStand;
   resultaat.worstSnelheid = worstSnelheid;
   resultaat.snijMoment = snijMoment;
-  resultaat.msTotSnijMoment = msTotSnijMoment;
   resultaat.snijVertragingOp = snijVertragingOp;
   resultaat.snijVertragingNeer = snijVertragingNeer;
   resultaat.worstLengte = worstLengte;
@@ -203,8 +212,9 @@ const char* CutterController::controllerStateName(ControllerState state) {
 
 // ---------------------------------------------------------------------------------------------
 // ga naar volgende state
-void CutterController::transitionToState(ControllerState nieuweState) {
+void CutterController::transitionToState(ControllerState nieuweState, double nu) {
   controller_state = nieuweState;
+  tijdLaatsteStateWijziging = nu;
   // logMessage("* %s", controllerStateName(controller_state));
 }
 
