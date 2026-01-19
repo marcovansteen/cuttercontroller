@@ -23,16 +23,14 @@ CutterResult CutterController::update(bool worstVoorS1, bool worstVoorS2, double
   switch (controller_state) {
 
     case ControllerState::Geen:
-      if (worstVoorS1 and !worstVoorS2) {
+      if (worstVoorS1 && !worstVoorS2) {
         beginVanWorstLaatstGezienDoorS1 = nu;
         transitionToState(ControllerState::AlleenS1, nu);
       }
       break;
     
     case ControllerState::AlleenS1:
-      if (worstVoorS2) {
-        transitionToState(ControllerState::Beide, nu);
-
+      if (worstVoorS1 && worstVoorS2) {
         float beginVanWorstLaatstGezienDoorS2 = nu;
         float tijdTussenS1enS2 = beginVanWorstLaatstGezienDoorS2 - beginVanWorstLaatstGezienDoorS1;
         if (tijdTussenS1enS2 < 1e-3) {  // dit voorkomt delen door een heel klein getal
@@ -60,7 +58,12 @@ CutterResult CutterController::update(bool worstVoorS1, bool worstVoorS2, double
         }
         
         logMessage("Wacht: %.0f ms, ", 1000 * teWachtenTijd);
-      } 
+        transitionToState(ControllerState::Beide, nu);
+      } else {
+        if (!worstVoorS1 && !worstVoorS2) {
+          transitionToState(ControllerState::Abnormaal, nu);
+        }
+      }
       break;
     
     case ControllerState::Beide:
@@ -71,7 +74,7 @@ CutterResult CutterController::update(bool worstVoorS1, bool worstVoorS2, double
         updateAutoHold();
       } else {
         if (!worstVoorS1 || !worstVoorS2) {
-          transitionToState(ControllerState::AlleenS2, nu);
+          transitionToState(ControllerState::Abnormaal, nu);
           logMessage("** Worst verdwenen voor het snijmoment **\n");
         }
       }
@@ -92,12 +95,18 @@ CutterResult CutterController::update(bool worstVoorS1, bool worstVoorS2, double
     case ControllerState::AlleenS2:
       transitionToState(ControllerState::Geen, nu);
       break;
+
+    case ControllerState::Abnormaal:
+      if(!worstVoorS1) {
+        transitionToState(ControllerState::Geen, nu);
+      }
+      break;
   }
 
   // time-out, voor het geval dat
   if (nu - tijdLaatsteStateWijziging > config.maxTeWachtenTijd * 2) { 
     logMessage("** State timeout, terug naar Geen **\n");
-    transitionToState(ControllerState::Geen, nu);
+    transitionToState(ControllerState::Abnormaal, nu);
   }
 
   resultaat.mesStand = mesStand;
@@ -206,6 +215,8 @@ const char* CutterController::controllerStateName(ControllerState state) {
       return "AlleenS2";
     case ControllerState::SnijCommandoVerstuurd:
       return "SnijCommandoVerstuurd";
+    case ControllerState::Abnormaal:
+      return "Abnormaal";
   }
   return "unknown";
 }

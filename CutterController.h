@@ -21,19 +21,20 @@
 // Bv. een afstand van 0.05 is 5 cm, en een tijd van 0.02 is 20 milliseconden.
 struct CutterConfig {
    
-  const bool autoHoldMogelijk = true;         // Zet deze op  = false (alleen kleine letters) om autohold uit te schakelen
-  const float afstandS2totReferentie = 0.065; // In meters. De vaste afstand van S2 tot de referentie hier noteren. Moet groter dan 0 zijn !!
-  const float afstandTussenS1enS2 = 0.050;    // In meters. Afstand tussen de twee sensoren, gebruikt om de invoersnelheid te schatten.
-  const double snijVertragingOpInit = 0.03;   // In seconden. De tijd tussen opgaande stuurflank en mes (laag -> hoog), na inschakelen.
-  const double snijVertragingNeerInit = 0.03; // In seconden. De tijd tussen neergaande stuurflank en mes (laag -> hoog), na inschakelen.
-  const double maxTeWachtenTijd = 2.0;        // In seconden. Maximum toegestane interval tussen snedes. Dit bepaalt de laagst mogelijke snelheid van de lijn !!!
-  const uint8_t aantalLengtes = 3;            // Over dit aantal lengtes wordt bepaald of lengte Constant is (voor auto-hold). Bij meer dan 100, dat getal ook verderop aanpassen in de regel die "lengtes[100]" bevat.
-  float minSnijVertraging = -0.4;             // In seconden, autohold regelt niet lager dan deze tijd terug
-  float maxSnijVertraging = 0.4;              // In seconden, autohold regelt niet hoger dan deze tijd op
-  const float autoHoldBijRegelStap = 0.001;   // In seconden per "even" worst per stap. 
-  const float autoHoldAanDrempel = 0.05;      // In meters. Als gemeten spreiding kleiner is dan deze lengte dan springt 'autohold' aan.
-  const float autoHoldUitDrempel = 0.10;      // In meters. Als gemeten spreiding over laatste AantalLengtes groter is dan deze drempel, springt 'autohold' uit.
-  
+  const bool autoHoldMogelijk = true;         // Zet deze op  = false (alleen kleine letters) om autohold uit te schakelen (org true)
+  const float afstandS2totReferentie = 0.065; // In meters. De vaste afstand van S2 tot de referentie hier noteren. Moet groter dan 0 zijn !!(org 0.065)
+  const float afstandTussenS1enS2 = 0.050;    // In meters. Afstand tussen de twee sensoren, gebruikt om de invoersnelheid te schatten.(org 0.050)
+  const double snijVertragingOpInit = 0.03;   // In seconden. De tijd tussen opgaande stuurflank en mes (laag -> hoog), na inschakelen. (org 0.03)
+  const double snijVertragingNeerInit = 0.03; // In seconden. De tijd tussen neergaande stuurflank en mes (laag -> hoog), na inschakelen.(org 0.03)
+  const double maxLengteCorrectie = 100.0;    // In meters. Maximale lengtecorrectie die per snede mag worden toegepast. (org 100.0)
+  const double maxTeWachtenTijd = 4.0;        // In seconden. Maximum toegestane interval tussen snedes. Dit bepaalt de laagst mogelijke snelheid van de lijn !!! (org 2.0)
+  const uint8_t aantalLengtes = 3;            // Over dit aantal lengtes wordt bepaald of lengte Constant is (voor auto-hold). Bij meer dan 100, dat getal ook verderop aanpassen in de regel die "lengtes[100]" bevat. (org 3)
+  float minSnijVertraging = -0.4;             // In seconden, autohold regelt niet lager dan deze tijd terug (org -0.4)
+  float maxSnijVertraging = 0.4;              // In seconden, autohold regelt niet hoger dan deze tijd op (org 0.4)
+  const float autoHoldBijRegelStap = 0.001;   // In seconden per "even" worst per stap. (org 0.001)
+  const float autoHoldAanDrempel = 0.05;      // In meters. Als gemeten spreiding kleiner is dan deze lengte dan springt 'autohold' aan. (org 0.05)
+  const float autoHoldUitDrempel = 0.10;      // In meters. Als gemeten spreiding over laatste AantalLengtes groter is dan deze drempel, springt 'autohold'
+ 
 };
 
 // Output state waarmee de aanroepende functie bv het mes kan besturen
@@ -71,6 +72,7 @@ private:
     Beide,
     AlleenS2,
     SnijCommandoVerstuurd,
+    Abnormaal
   };
 
   void logMessage(const char* format, ...) const;

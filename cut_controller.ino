@@ -1,9 +1,14 @@
 /*
   cut-controller.ino
 
+  Versie 1.2
+
   - Leest sensors uit
   - Toggelt het mes (=de grote groene LED)
   - Geeft status weer op seriële monitor.
+  
+  Wijzigingen sinds vorige versie:
+  - Met handling van uitzonderingssituaties (in .cpp)
 
 */
 
@@ -29,6 +34,7 @@ void setup() {
   Serial.begin(115200);
   cutterController.setLogCallback(controller_log_callback);
   cutterController.enableLogging(true);
+
 }
 
 // oneindige lus
