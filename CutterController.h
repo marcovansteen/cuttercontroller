@@ -31,10 +31,8 @@ struct CutterConfig {
   const uint8_t aantalLengtes = 3;            // Over dit aantal lengtes wordt bepaald of lengte Constant is (voor auto-hold). Bij meer dan 100, dat getal ook verderop aanpassen in de regel die "lengtes[100]" bevat. (org 3)
   float minSnijVertraging = -0.4;             // In seconden, autohold regelt niet lager dan deze tijd terug (org -0.4)
   float maxSnijVertraging = 0.4;              // In seconden, autohold regelt niet hoger dan deze tijd op (org 0.4)
-  const float autoHoldBijRegelStap = 0.001;   // In seconden per "even" worst per stap. (org 0.001)
-  const float autoHoldAanDrempel = 0.05;      // In meters. Als gemeten spreiding kleiner is dan deze lengte dan springt 'autohold' aan. (org 0.05)
-  const float autoHoldUitDrempel = 0.10;      // In meters. Als gemeten spreiding over laatste AantalLengtes groter is dan deze drempel, springt 'autohold'
- 
+  const float autoHoldAanDrempel = 0.02;      // In meters. Als gemeten spreiding kleiner is dan deze lengte dan springt 'autohold' aan. (org 0.02)
+  const float autoHoldUitDrempel = 0.04;      // In meters. Als gemeten spreiding over laatste AantalLengtes groter is dan deze drempel, springt 'autohold' uit. (org 0.04)
 };
 
 // Output state waarmee de aanroepende functie bv het mes kan besturen

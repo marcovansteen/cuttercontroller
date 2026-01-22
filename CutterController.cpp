@@ -13,100 +13,85 @@ CutterController::CutterController(const CutterConfig& config): config(config), 
   geleerdeLengte = 0.4; // standaard waarde van 40 cm voor het geval dat
 }
 
+
 // ---------------------------------------------------------------------------------------------
 // Sample sensors, timing, and latency feedback to determine whether a cut should fire and
 // to update telemetry that downstream systems (MES, pneumatics) consume.
 CutterResult CutterController::update(bool worstVoorS1, bool worstVoorS2, double nu) {
 
   CutterResult resultaat{};
-  
-  switch (controller_state) {
-
-    case ControllerState::Geen:
-      if (worstVoorS1 && !worstVoorS2) {
-        beginVanWorstLaatstGezienDoorS1 = nu;
-        transitionToState(ControllerState::AlleenS1, nu);
-      }
-      break;
-    
-    case ControllerState::AlleenS1:
-      if (worstVoorS1 && worstVoorS2) {
-        float beginVanWorstLaatstGezienDoorS2 = nu;
-        float tijdTussenS1enS2 = beginVanWorstLaatstGezienDoorS2 - beginVanWorstLaatstGezienDoorS1;
-        if (tijdTussenS1enS2 < 1e-3) {  // dit voorkomt delen door een heel klein getal
-          logMessage("Diff '%d' is kleiner dan 1.0ms, afgerond naar 1.0ms", tijdTussenS1enS2);
-          tijdTussenS1enS2 = 1e-3;
-        } 
-        worstSnelheid = config.afstandTussenS1enS2 / tijdTussenS1enS2;
-        logMessage("\nv: %.3f m/s, ", worstSnelheid);
-
-        float dodeTijd;
-        if (mesStand) {
-          dodeTijd = snijVertragingNeer;    // aangezien de autohold regelaar hier ingrijpt,
-        } else {                            // kan de dodetijd ook negatief worden !
-          dodeTijd = snijVertragingOp;      // 
-        }
-
-        // bereken snij tijdstip zodat de worst wordt doorgesneden zodra de voorkant bij "pijl" aankomt,
-        // hou via 'dodeTijd' rekening met pneumatiek, mes mechaniek en autohold bijsturing
-        snijMoment = beginVanWorstLaatstGezienDoorS2 + config.afstandS2totReferentie / worstSnelheid - dodeTijd;
-        
-        float teWachtenTijd = snijMoment - nu;
-        if(teWachtenTijd > config.maxTeWachtenTijd ) {     // Dit bepaalt de laagst mogelijke snelheid, en de maximale worstlengte.
-          teWachtenTijd = config.maxTeWachtenTijd;
-          snijMoment = nu + config.maxTeWachtenTijd;       // Is aan te passen in CutterController.h !!!
-        }
-        
-        logMessage("Wacht: %.0f ms, ", 1000 * teWachtenTijd);
-        transitionToState(ControllerState::Beide, nu);
-      } else {
-        if (!worstVoorS1 && !worstVoorS2) {
-          transitionToState(ControllerState::Abnormaal, nu);
-        }
-      }
-      break;
-    
-    case ControllerState::Beide:
-      if (nu >= snijMoment) {
-        transitionToState(ControllerState::SnijCommandoVerstuurd, nu);
-        mesStand = !mesStand;
-
-        updateAutoHold();
-      } else {
-        if (!worstVoorS1 || !worstVoorS2) {
-          transitionToState(ControllerState::Abnormaal, nu);
-          logMessage("** Worst verdwenen voor het snijmoment **\n");
-        }
-      }
-      break;
-    
-    case ControllerState::SnijCommandoVerstuurd:
-      if (!worstVoorS1) {
-        transitionToState(ControllerState::AlleenS2, nu);
-
-        float eindVanWorstLaatstGezienDoorS1 = nu;
-        float tijdsduurWorstVoorS1 = eindVanWorstLaatstGezienDoorS1 - beginVanWorstLaatstGezienDoorS1;
-        worstLengte = tijdsduurWorstVoorS1 * worstSnelheid;
-        logMessage("Worstlengte: %.1f mm. ", 1000 * worstLengte);
-        leerLengte(worstLengte);
-      }
-      break;
-    
-    case ControllerState::AlleenS2:
-      transitionToState(ControllerState::Geen, nu);
-      break;
-
-    case ControllerState::Abnormaal:
-      if(!worstVoorS1) {
-        transitionToState(ControllerState::Geen, nu);
-      }
-      break;
+ 
+  static bool prevWorstVoorS1 = false;
+  static bool prevWorstVoorS2 = false;
+  // detect rising edges on sensors
+  if (worstVoorS1 && !prevWorstVoorS1) {
+    beginVanWorstLaatstGezienDoorS1 = nu;
+//    logMessage("\nS1 rising edge at %.3f s. ", nu);
+    transitionToState(ControllerState::AlleenS1, nu);
   }
+  
+  if (worstVoorS2 && !prevWorstVoorS2) {
+  //  logMessage("\nS2 rising edge at %.3f s. ", nu);
+    if (controller_state == ControllerState::AlleenS1) {
+      float beginVanWorstLaatstGezienDoorS2 = nu;
+      float tijdTussenS1enS2 = beginVanWorstLaatstGezienDoorS2 - beginVanWorstLaatstGezienDoorS1;
+      if (tijdTussenS1enS2 < 1e-3) {  // dit voorkomt delen door een heel klein getal
+        logMessage("Diff '%.3f' is kleiner dan 1.0ms, afgerond naar 1.0ms", tijdTussenS1enS2);
+        tijdTussenS1enS2 = 1e-3;
+      } 
+      worstSnelheid = config.afstandTussenS1enS2 / tijdTussenS1enS2;
+      logMessage("\nv: %.3f m/s, ", worstSnelheid);
+
+      float dodeTijd;
+      if (mesStand) {
+        dodeTijd = snijVertragingNeer;    // aangezien de autohold regelaar hier ingrijpt,
+      } else {                            // kan de dodetijd ook negatief worden !
+        dodeTijd = snijVertragingOp;      // 
+      }
+
+      // bereken snij tijdstip zodat de worst wordt doorgesneden zodra de voorkant bij "pijl" aankomt,
+      // hou via 'dodeTijd' rekening met pneumatiek, mes mechaniek en autohold bijsturing
+      snijMoment = beginVanWorstLaatstGezienDoorS2 + config.afstandS2totReferentie / worstSnelheid + dodeTijd;
+      
+      float teWachtenTijd = snijMoment - nu;
+      if(teWachtenTijd > config.maxTeWachtenTijd ) {     // Dit bepaalt de laagst mogelijke snelheid, en de maximale worstlengte.
+        teWachtenTijd = config.maxTeWachtenTijd;
+        snijMoment = nu + config.maxTeWachtenTijd;       // Is aan te passen in CutterController.h !!!
+      }
+      
+      logMessage("Wacht: %.0f ms, ", 1000 * teWachtenTijd);
+      transitionToState(ControllerState::Beide, nu);
+    }
+  }
+
+  if(nu >= snijMoment && controller_state == ControllerState::Beide) {
+    transitionToState(ControllerState::SnijCommandoVerstuurd, nu);
+    mesStand = !mesStand;
+
+    updateAutoHold();
+  }
+
+  if (!worstVoorS1 && prevWorstVoorS1) {
+//    logMessage("\nS1 falling edge at %.3f s. ", nu);
+    if (controller_state == ControllerState::SnijCommandoVerstuurd) {
+      transitionToState(ControllerState::AlleenS2, nu);
+
+      float eindVanWorstLaatstGezienDoorS1 = nu;
+      float tijdsduurWorstVoorS1 = eindVanWorstLaatstGezienDoorS1 - beginVanWorstLaatstGezienDoorS1;
+      worstLengte = tijdsduurWorstVoorS1 * worstSnelheid;
+      logMessage("Worstlengte: %.1f mm. ", 1000 * worstLengte);
+      leerLengte(worstLengte);
+    }
+  }
+
+  prevWorstVoorS2 = worstVoorS2;
+  prevWorstVoorS1 = worstVoorS1; 
 
   // time-out, voor het geval dat
   if (nu - tijdLaatsteStateWijziging > config.maxTeWachtenTijd * 2) { 
     logMessage("** State timeout, terug naar Geen **\n");
     transitionToState(ControllerState::Abnormaal, nu);
+    autoHoldActief = false;
   }
 
   resultaat.mesStand = mesStand;
@@ -170,6 +155,9 @@ void CutterController::updateAutoHold() {
       autoHoldActief= false;        // reset buffer om na afwijking te snel terug inschakelen te voorkomen
       lengteBufferVol = false;
       lengteIdx = 0;
+      snijVertragingOp = config.snijVertragingOpInit;
+      snijVertragingNeer = config.snijVertragingNeerInit;
+
       logMessage(" ** AUTOHOLD UIT ** ");
     }
   }
@@ -184,12 +172,17 @@ void CutterController::updateAutoHoldTiming(float nieuweLengte) {
   // En omgekeerd. Dit apart regelen voor mes omhoog en omlaag. 
   if(autoHoldActief) {
 
-    float tijdStap = config.autoHoldBijRegelStap / worstSnelheid;
+    float tijdStap;
+
+    // tijdStap = config.autoHoldBijRegelStap / worstSnelheid;
+    tijdStap = (autoHoldDoelLengte - nieuweLengte) / worstSnelheid;
 
     if(mesStand) {
-      if(nieuweLengte > autoHoldDoelLengte) snijVertragingOp -= tijdStap; else snijVertragingOp += tijdStap;
+      // if(nieuweLengte > autoHoldDoelLengte) snijVertragingOp -= tijdStap; else snijVertragingOp += tijdStap;
+      snijVertragingOp += tijdStap;
     } else {
-      if(nieuweLengte > autoHoldDoelLengte) snijVertragingNeer -= tijdStap; else snijVertragingNeer += tijdStap;
+      // if(nieuweLengte > autoHoldDoelLengte) snijVertragingNeer -= tijdStap; else snijVertragingNeer += tijdStap;
+      snijVertragingNeer += tijdStap;
     }
       
     // begrens de regelaar om puinhoop in de fabriek te voorkomen bij op hol geslagen regeling
